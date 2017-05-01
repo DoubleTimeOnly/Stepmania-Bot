@@ -14,7 +14,7 @@ def mask(image):
     mask = cv2.rectangle(mask, (300,55) , (560,350), 255, thickness=-1)
     masked_data = cv2.bitwise_and(image,image,mask = mask)    
     return masked_data
-        
+from video_capture2 import CaptureScreen
 
 def main():
    
@@ -29,13 +29,14 @@ def main():
     temp = 0
     lastPressed=''
     lastProportional = 85
-    threshold = 12
+    threshold = 10
     integralSum = 0
     base = 85
     while(True):
         tInitial = time.time()
-        printscreen_pil =  ImageGrab.grab(bbox=(1060,40,1920,520) )
-        screen = numpy.array(printscreen_pil,dtype='uint8')#.reshape((printscreen_pil.size[1],printscreen_pil.size[0],3)) 
+        #printscreen_pil =  ImageGrab.grab(bbox=(1060,40,1920,520) )
+        #screen = numpy.array(printscreen_pil,dtype='uint8')#.reshape((printscreen_pil.size[1],printscreen_pil.size[0],3)) 
+        screen = CaptureScreen()
         gray = cv2.cvtColor(screen, cv2.COLOR_BGR2GRAY) 
         masked_data = mask(gray)
 
@@ -43,7 +44,9 @@ def main():
         #cv2.imshow('window',masked_data)
         #edged = cv2.Canny(masked_data, 300, 380)
         #cv2.imshow('edge',edged)
-
+        #cv2.imshow('masked_data',masked_data)
+        cv2.waitKey(1)
+        
         frameDelta = cv2.absdiff(background, masked_data) #was masked_data
         #retval,frameDelta = cv2.threshold(frameDelta,40,255,cv2.THRESH_BINARY)
         cv2.imshow('diff',frameDelta)
@@ -72,6 +75,8 @@ def main():
                 if cv2.contourArea( cnt ) > 300:
                     x,y,w,h = cv2.boundingRect(cnt) #x,y is top left coord, w,h is width and height
                     #print x,y,w,h
+                    if w > 70:
+                        continue
                     cv2.rectangle(screen,(x,y),(x+w,y+h),(0,255,0),1)
                     cv2.drawContours(screen, [cnt],-1, (0, 255, 0), 1)
                     moments = cv2.moments(cnt)   
@@ -80,6 +85,7 @@ def main():
                     #print cy
                     
                     cy = y+30
+                    
                     cv2.line(screen, (300,cy),(550,cy), (0,0,255),2)
                     
                     ##pid threshold values?
