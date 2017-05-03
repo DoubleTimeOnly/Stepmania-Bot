@@ -1,5 +1,5 @@
 '''
-note: cmod 50 seems optimal atm
+note: somehow stepmania cuts fps down from 55 to 30
 '''
 
 import imutils      #basic image editing
@@ -9,130 +9,202 @@ from PIL import Image,ImageGrab
 from matplotlib import pyplot
 import time
 from DirectKeys import PressKey,ReleaseKey,UP,DOWN,LEFT,RIGHT
-def mask(image):
-    mask = numpy.zeros_like(image,numpy.uint8)
-    mask = cv2.rectangle(mask, (300,55) , (560,350), 255, thickness=-1)
-    masked_data = cv2.bitwise_and(image,image,mask = mask)    
-    return masked_data
+from videoReader import VideoPlayer
+def ColorMask(image,lowerBoundary,upperBoundary):
+    
+    lower = numpy.array(lowerBoundary,dtype='uint8')
+    upper = numpy.array(upperBoundary,dtype='uint8')
+    
+    mask = cv2.inRange(image,lower,upper)
+    return mask
+    #return cv2.bitwise_and(image,image,mask=mask)
 from video_capture2 import CaptureScreen
 
 def main():
-   
+    ############
+    ##Settings##
+    ############
+    inputOn = True
+    screenOn = False
+    noteType='bar'  #options: bar | arrow
+     
+    
+    ###############
+    ##Calibration##
+    ###############
+    #Current settings for ~30 fps
+    #c500:30 | c200:15 | c150:10
+    threshold = 30      #how early notes can be hit
+    minThreshold = 15   #how late notes can be hit
+    base = 52           #exactly where receptors are
+    
+    ##delay lays somewhere between (0.02,0.5)
+    ##idk tbh
+    #delay = 0.04
+    delay = 0.002   #minimum time between arrow presses
+    
+    #############
+    ##Constants##
+    #############
+    #mark middle of note from top
+    #lrHeight is left,right notes and udHeight is up,down notes
+    if noteType=='arrow':
+        lrHeight=30
+        udHeight=30
+    if noteType=='bar':
+        lrHeight=13
+        udHeight=13       
+    #Define lower and upper range of what is considered that color
+    #lower,upper BGR format
+    red = ([0, 0, 150], [130, 130, 255],'red') 
+    yellow = ([0, 160, 160], [50, 255, 255],'yellow') 
+    blue = ([100, 0, 0], [250, 56, 50],'blue')
+    colors = [red]      #which colors will be looked for
+    video = []      #if screenOn=True, stores each frame of screen, clears at 5000 frames
     count = 0
-    avgFPS=0
-    background = cv2.imread('background.png')
-    background = cv2.cvtColor(background, cv2.COLOR_BGR2GRAY) 
-    background = mask(background)
-    edgedbackground = cv2.imread('edged_background.png')
-    edgedbackground = cv2.cvtColor(edgedbackground, cv2.COLOR_BGR2GRAY) 
-    edgedbackground = mask(edgedbackground)    
-    temp = 0
-    lastPressed=''
-    lastProportional = 85
-    threshold = 10
-    integralSum = 0
-    base = 85
+    avgFPS=0    
+    tUP = 0
+    tLEFT = 0
+    tRIGHT = 0
+    tDOWN = 0
+    
+    ##Print settings
+    print '[Notetype]:',noteType
+    print '[Colors]: ',colors
+    print '[Threshold]:',threshold
+    print '[Min-Threshold]:',minThreshold
     while(True):
         tInitial = time.time()
-        #printscreen_pil =  ImageGrab.grab(bbox=(1060,40,1920,520) )
-        #screen = numpy.array(printscreen_pil,dtype='uint8')#.reshape((printscreen_pil.size[1],printscreen_pil.size[0],3)) 
-        screen = CaptureScreen()
-        gray = cv2.cvtColor(screen, cv2.COLOR_BGR2GRAY) 
-        masked_data = mask(gray)
-
         
-        #cv2.imshow('window',masked_data)
-        #edged = cv2.Canny(masked_data, 300, 380)
-        #cv2.imshow('edge',edged)
-        #cv2.imshow('masked_data',masked_data)
-        cv2.waitKey(1)
+        ##Input format: (width,height),(cornerX,cornerY)
+        screen = CaptureScreen((300,150),(1340,94))     
+       
+        screen = cv2.cvtColor(screen, cv2.COLOR_RGBA2RGB)  #remove alpha channel        
+        contours = []
         
-        frameDelta = cv2.absdiff(background, masked_data) #was masked_data
-        #retval,frameDelta = cv2.threshold(frameDelta,40,255,cv2.THRESH_BINARY)
-        cv2.imshow('diff',frameDelta)
-        #try:
-            #(contours, _) = cv2.findContours(frameDelta, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-        #except ValueError:
-        (c1,contours,c2) = cv2.findContours(frameDelta, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)     
-        
-        cv2.line(screen, (300,85),(550,85), (255,0,0),2)
-        #cv2.line(screen, (300,92),(550,92), (255,0,0),2)
-        
-        
-        #left down up right
-        #cv2.line(screen, (330,85),(330,200), (255,0,0),2)
-        ##cv2.line(screen, (310,85),(310,200), (255,255,0),2)
-        ##cv2.line(screen, (350,85),(350,200), (255,255,0),2)
-        
-        #cv2.line(screen, (395,85),(395,200), (255,0,0),2)
-        #cv2.line(screen, (460,85),(460,200), (255,0,0),2)
-        #cv2.line(screen, (525,85),(525,200), (255,0,0),2)
-        
-        if temp ==1:
-            temp = 0
+        ##mask the screen over the selected colors to find arrows of said colors
+        ##and store each contour(arrow) in a list
+        for color in colors:
+            #masked_data = ColorMask(screen,color[0],color[1])
+            frameDelta = ColorMask(screen,color[0],color[1])
+            #cv2.imshow('%s' %(color[2]),masked_data)
+            #cv2.waitKey(1)      
+            #frameDelta = cv2.absdiff(background, masked_data) #was masked_data
+            #cv2.imshow('diff',frameDelta)
             
-            for cnt in contours:
-                if cv2.contourArea( cnt ) > 300:
-                    x,y,w,h = cv2.boundingRect(cnt) #x,y is top left coord, w,h is width and height
-                    #print x,y,w,h
-                    if w > 70:
-                        continue
-                    cv2.rectangle(screen,(x,y),(x+w,y+h),(0,255,0),1)
-                    cv2.drawContours(screen, [cnt],-1, (0, 255, 0), 1)
-                    moments = cv2.moments(cnt)   
-                    cx = int(moments['m10']/moments['m00'])
-                    cy = int(moments['m01']/moments['m00'])
-                    #print cy
-                    
-                    cy = y+30
-                    
-                    cv2.line(screen, (300,cy),(550,cy), (0,0,255),2)
-                    
-                    ##pid threshold values?
-    
-                    if cy < 85+threshold and cy > 85-20:
-                        cv2.line(screen, (300,cy),(550,cy), (0,255,255),2)                        
-                        if cx < 330+20 and cx > 330-20:
-                            lastPressed = 'left'
-                            PressKey(LEFT)
-                            ReleaseKey(LEFT)
-                                
-                        if cx < 395+20 and cx > 395-20:
-                            lastPressed = 'down'
-                            PressKey(DOWN)
-                            ReleaseKey(DOWN)
-                                
-                        if cx < 460+20 and cx > 460-20:
-                            lastPressed = 'up'
-                            PressKey(UP)
-                            ReleaseKey(UP)                                      
-                                
-                        if cx < 525+20 and cx > 525-20:
-                            PressKey(RIGHT)
-                            ReleaseKey(RIGHT)
-        temp+=1
-        cv2.imshow('temp',screen)
+            #frameDelta = cv2.cvtColor(frameDelta, cv2.COLOR_BGR2GRAY) 
+
+            (c1,contoursTemp,c2) = cv2.findContours(frameDelta, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)     
+            contours.extend(contoursTemp)
         
+        ##Hitbox drawing
+        cv2.line(screen, (0,base),(300,base), (255,0,0),2)    #receptor hitbox
+        #min-threshold lines
+        cv2.line(screen, (0,base-29-minThreshold),(500,base-29-minThreshold), (0,0,255),1)
+        cv2.line(screen, (0,base-13-minThreshold),(500,base-13-minThreshold), (0,0,255),1)
+        #max-threshold line
+        cv2.line(screen, (0,base+threshold),(300,base+threshold), (125,125,0),1)    #receptor hitbox
+        #Lane lines
+        cv2.line(screen, (47,0),(47,200), (255,0,0),1)
+        cv2.line(screen, (111,0),(111,200), (255,0,0),1)
+        cv2.line(screen, (175,0),(175,200), (255,0,0),1)
+        cv2.line(screen, (240,0),(240,200), (255,0,0),1)                  
+        
+        #################
+        ##Hit Detection##
+        #################
+        for cnt in contours:
+            ##make sure we're not picking up some random contour
+            if cv2.contourArea( cnt ) > 20:
+                ##bounding rectangle: rectangle that encompasses contour
+                ##x,y is top left coord, w,h is width and height
+                x,y,w,h = cv2.boundingRect(cnt)
 
-        #if cv2.waitKey(1) & 0xFF == ord('q'):
-            #cv2.imwrite('background.png',masked_data)
-            ##cv2.imwrite('edged_background.png',edged)    
-            #print 'background frame updated'
-            #return
-
-        if cv2.waitKey(1) & 0xFF == ord('p'):
-            print 'paused'
-            while True:
-                if cv2.waitKey(25) & 0xFF == ord('r'):
-                    print 'resume'
-                    break
-
+                ##calculate X position of arrow
+                moments = cv2.moments(cnt)   
+                cx = int(moments['m10']/moments['m00'])
+                
+                ##calculate y position of arrow
+                cy = y+30                
+                
+                if (cx < 47+31 and cx > 47-31) or (cx < 240+31 and cx > 240-31):
+                    cy = y+lrHeight     #determine note's hitbox
+                    if y <= base-lrHeight-minThreshold:    #check not too far up
+                        continue                    
+                elif (cx < 111+31 and cx > 111-31) or (cx < 175+31 and cx > 175-31):
+                    if y < base-udHeight-minThreshold:
+                        continue
+                    cy = y+udHeight
+                
+                ##outlines arrow and draws boxes around them
+                ##just for visual purposes
+                cv2.rectangle(screen,(x,y),(x+w,y+h),(0,255,0),1)
+                #cv2.drawContours(screen, [cnt],-1, (0, 255, 0), 1)                
+                ##draw arrow's "hitline" in light blue
+                cv2.line(screen, (x,cy),(x+w,cy), (255,255,0),2)
+                
+                ##if the arrow is within threshold pixels of the target
+                ##then press the appropriate key
+                if cy < base+threshold and cy > base-threshold-5 and inputOn:
+                    if cx < 47+31 and cx > 47-31:
+                        #notes cannot be pressed twice within "delay" seconds
+                        if tInitial - tLEFT < delay:
+                            continue
+                        tLEFT = time.time()     #reset input timer
+                        PressKey(LEFT)
+                        cv2.line(screen, (x,cy),(x+w,cy), (0,255,255),2)
+                        ReleaseKey(LEFT)
+                        
+                    if cx < 111+31 and cx > 111-31:
+                        if tInitial - tDOWN < delay:
+                            continue        
+                        tDOWN = time.time()                        
+                        PressKey(DOWN)
+                        cv2.line(screen, (x,cy),(x+w,cy), (0,255,255),2)
+                        ReleaseKey(DOWN)
+                    if cx < 175+31 and cx > 175-31:
+                        if tInitial - tUP < delay:
+                            continue        
+                        tUP = time.time()                         
+                        PressKey(UP)
+                        cv2.line(screen, (x,cy),(x+w,cy), (0,255,255),2)
+                        ReleaseKey(UP)     
+                    if cx < 240+31 and cx > 240-31:
+                        if tInitial - tRIGHT < delay:
+                            continue        
+                        tRIGHT = time.time()                         
+                        PressKey(RIGHT)
+                        cv2.line(screen, (x,cy),(x+w,cy), (0,255,255),2)
+                        ReleaseKey(RIGHT)
+        ###############
+        ##Scren Stuff##
+        ###############
+        if screenOn:
+            cv2.imshow('temp',screen)
+            if len(video) > 5000:   #clear buffer if contents are too large
+                video = []
+            video.append( cv2.cvtColor(screen,cv2.COLOR_RGB2GRAY))  #save some space
+            key = cv2.waitKey(1)
+    
+            if key & 0xFF == ord('p'):
+                print 'paused'
+                while True:
+                    key = cv2.waitKey(0)
+                    if key & 0xFF == ord('r'):                
+                        print 'resume'
+                        break
+                    if key & 0xFF == ord('v'):
+                        VideoPlayer(video)
         tFinal = time.time()
+        
+        ##prints fps every 20 cycles
         if count == 20:
             print '[average fps]',1/(avgFPS/20)
             count = 0
             avgFPS = 0
-        count +=1
+        count += 1
         avgFPS += tFinal - tInitial
 if __name__ == '__main__':
     main()
+
+        
