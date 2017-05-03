@@ -10,3 +10,8 @@ Plays Stepmania 5 songs
   - c500
   - No holds
   - No attacks,mines,etc
+  
+## Program settings
+  - Threshold, minThreshold, delay are fps dependent
+    - Threshold and minThreshold determine hit area
+    - Delay is minimum time between arrow hits
